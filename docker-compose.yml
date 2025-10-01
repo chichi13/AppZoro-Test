@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: school-mgmt-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-school_mgmt}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Mount seed scripts for auto-initialization (executed in alphabetical order)
+      - ./seed_db/tables.sql:/docker-entrypoint-initdb.d/01-tables.sql
+      - ./seed_db/seed-db.sql:/docker-entrypoint-initdb.d/02-seed-db.sql
+      # Persist database data
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-school_mgmt}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - school-mgmt-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: school-mgmt-backend
+    restart: unless-stopped
+    environment:
+      PORT: 5007
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-school_mgmt}
+      JWT_ACCESS_TOKEN_SECRET: ${JWT_ACCESS_TOKEN_SECRET:-your_super_secret_jwt_access_token_key_change_this_in_production}
+      JWT_REFRESH_TOKEN_SECRET: ${JWT_REFRESH_TOKEN_SECRET:-your_super_secret_jwt_refresh_token_key_change_this_in_production}
+      CSRF_TOKEN_SECRET: ${CSRF_TOKEN_SECRET:-your_super_secret_csrf_token_key_change_this_in_production}
+      JWT_ACCESS_TOKEN_TIME_IN_MS: ${JWT_ACCESS_TOKEN_TIME_IN_MS:-900000}
+      JWT_REFRESH_TOKEN_TIME_IN_MS: ${JWT_REFRESH_TOKEN_TIME_IN_MS:-28800000}
+      CSRF_TOKEN_TIME_IN_MS: ${CSRF_TOKEN_TIME_IN_MS:-950000}
+      EMAIL_VERIFICATION_TOKEN_SECRET: ${EMAIL_VERIFICATION_TOKEN_SECRET:-your_super_secret_email_verification_key}
+      EMAIL_VERIFICATION_TOKEN_TIME_IN_MS: ${EMAIL_VERIFICATION_TOKEN_TIME_IN_MS:-18000000}
+      PASSWORD_SETUP_TOKEN_SECRET: ${PASSWORD_SETUP_TOKEN_SECRET:-your_super_secret_password_setup_key}
+      PASSWORD_SETUP_TOKEN_TIME_IN_MS: ${PASSWORD_SETUP_TOKEN_TIME_IN_MS:-300000}
+      UI_URL: ${UI_URL:-http://localhost:5173}
+      API_URL: ${API_URL:-http://localhost:5007}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-localhost}
+      MAIL_FROM_USER: ${MAIL_FROM_USER:-noreply@school-mgmt.com}
+      RESEND_API_KEY: ${RESEND_API_KEY:-your_resend_api_key_here}
+      NODE_ENV: ${NODE_ENV:-development}
+    ports:
+      - "${BACKEND_PORT:-5007}:5007"
+    # Add healthcheck when backend health endpoint is implemented
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - school-mgmt-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:5007}
+    container_name: school-mgmt-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    networks:
+      - school-mgmt-network
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:5173",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+networks:
+  school-mgmt-network:
+    driver: bridge
+    name: school-mgmt-network
+
+volumes:
+  postgres_data:
+    name: school-mgmt-postgres-data
